@@ -106,6 +106,10 @@
 #  define I2S_BUFFER_COUNT 6 // 20
 #endif
 
+#ifndef I2S_WARN_ON_UNDERRUN_OVERRUN
+#  define I2S_WARN_ON_UNDERRUN_OVERRUN true
+#endif
+
 #ifndef ANALOG_BUFFER_SIZE 
 #  define ANALOG_BUFFER_SIZE 512
 #endif

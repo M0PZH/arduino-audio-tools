@@ -9,6 +9,7 @@
 #include "soc/adc_channel.h"
 #include "soc/rtc.h"
 #include "AudioTools/CoreAudio/AudioStreams.h"
+#include "freertos/queue.h"
 
 namespace audio_tools {
 
@@ -74,11 +75,37 @@ class AnalogDriverESP32  : public AnalogDriverBase {
 #endif
         };
 
+#if I2S_WARN_ON_UNDERRUN_OVERRUN
         // setup config
+        if (i2s_driver_install(port_no, &i2s_config, 8, &i2s_queue)!=ESP_OK){
+#else
         if (i2s_driver_install(port_no, &i2s_config, 0, nullptr)!=ESP_OK){
+#endif
           LOGE( "%s - %s", __func__, "i2s_driver_install");
           return false;
         }    
+
+#if I2S_WARN_ON_UNDERRUN_OVERRUN
+        // create a task to monitor the i2s queue for underrun/overrun events
+        if (xTaskCreate([](void* param){
+          QueueHandle_t queue = (QueueHandle_t) param;
+          i2s_event_t event;
+          while (xQueueReceive(queue, &event, portMAX_DELAY) == pdPASS) {
+            if (event.type == I2S_EVENT_TX_Q_OVF) {
+              LOGW("I2S TX Queue Overflow");
+            } else if (event.type == I2S_EVENT_RX_Q_OVF) {
+              LOGW("I2S RX Queue Overflow");
+            } else if (event.type == I2S_EVENT_MAX) {
+              break;
+            }
+          }
+          vTaskDelete(NULL);
+        }, "I2SEventTask", 1024, i2s_queue, 2, nullptr) != pdPASS) {
+          vQueueDelete(i2s_queue);
+          LOGE( "%s - %s", __func__, "xTaskCreate");
+          return false;
+        }
+#endif
 
         // record driver as installed
         is_driver_installed = true;  
@@ -145,6 +172,14 @@ class AnalogDriverESP32  : public AnalogDriverBase {
           i2s_adc_disable(port_no); 
         } 
         if (adc_config.uninstall_driver_on_end){
+#if I2S_WARN_ON_UNDERRUN_OVERRUN
+          if (i2s_queue) {
+            i2s_event_t stop_event = {.type = I2S_EVENT_MAX};
+            xQueueSend(i2s_queue, &stop_event, portMAX_DELAY);
+            i2s_queue = nullptr;
+            taskYIELD(); // HACK
+          }
+#endif
           i2s_driver_uninstall(port_no); 
           is_driver_installed = false;
         } else {
@@ -209,6 +244,10 @@ class AnalogDriverESP32  : public AnalogDriverBase {
     bool active = false;
     bool is_driver_installed = false;
     size_t result=0;
+#if I2S_WARN_ON_UNDERRUN_OVERRUN
+    QueueHandle_t i2s_queue;
+    SemaphoreHandle_t i2s_event_task_completion;
+#endif
 
   // input values
     adc_unit_t adc_unit;
