@@ -285,10 +285,14 @@ class OpusAudioEncoder : public AudioEncoder {
     int size = getFrameSizeSamples(cfg.sample_rate) * 2;
     frame.resize(size);
     assert(frame.data() != nullptr);
-    enc = opus_encoder_create(cfg.sample_rate, cfg.channels, cfg.application,
-                              &err);
+
+    size_t enc_size = opus_encoder_get_size(cfg.channels);
+    encbuf.resize(enc_size);
+    assert(encbuf.data() != nullptr);
+    enc = (OpusEncoder *)encbuf.data();
+    err = opus_encoder_init(enc, cfg.sample_rate, cfg.channels, cfg.application);
     if (err != OPUS_OK) {
-      LOGE("opus_encoder_create: %s for sample_rate: %d, channels:%d",
+      LOGE("opus_encoder_init: %s for sample_rate: %d, channels:%d",
            opus_strerror(err), cfg.sample_rate, cfg.channels);
       return false;
     }
@@ -310,8 +314,6 @@ class OpusAudioEncoder : public AudioEncoder {
   void end() override {
     // flush buffered data
     encodeFrame();
-    // release memory
-    opus_encoder_destroy(enc);
     is_open = false;
   }
 
@@ -336,6 +338,7 @@ class OpusAudioEncoder : public AudioEncoder {
   OpusEncoder *enc = nullptr;
   OpusEncoderSettings cfg;
   bool is_open = false;
+  Vector<uint8_t> encbuf{0};
   Vector<uint8_t> frame{0};
   int frame_pos = 0;
 
